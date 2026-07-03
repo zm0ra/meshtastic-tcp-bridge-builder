@@ -1,0 +1,12 @@
+diff --git a/variants/esp32/esp32-common.ini b/variants/esp32/esp32-common.ini
+index 15ab8ad44..2de746ef4 100644
+--- a/variants/esp32/esp32-common.ini
++++ b/variants/esp32/esp32-common.ini
+@@ -49,6 +49,7 @@ build_flags =
+   -DLIBPAX_WIFI
+   -DLIBPAX_BLE
+   -DHAS_UDP_MULTICAST=1
++  -DHAS_TCP_BRIDGE=1
+   ;-DDEBUG_HEAP
+ 
+ lib_deps =

@@ -1,0 +1,17 @@
+diff --git a/src/mesh/Router.cpp b/src/mesh/Router.cpp
+index 3aaef97f6..64005dae3 100644
+--- a/src/mesh/Router.cpp
++++ b/src/mesh/Router.cpp
+@@ -374,6 +374,12 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
+     }
+ #endif
+ 
++#if HAS_TCP_BRIDGE
++    if (tcpBridge) {
++        tcpBridge->onSend(const_cast<meshtastic_MeshPacket *>(p));
++    }
++#endif
++
+     assert(iface); // This should have been detected already in sendLocal (or we just received a packet from outside)
+     return iface->send(p);
+ }

@@ -1,0 +1,31 @@
+diff --git a/src/main.cpp b/src/main.cpp
+index 9ac060d37..086d1d09b 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -150,6 +150,11 @@ extern void tftSetup(void);
+ UdpMulticastHandler *udpHandler = nullptr;
+ #endif
+ 
++#ifdef HAS_TCP_BRIDGE
++#include "mesh/tcp/TcpBridgeHandler.h"
++TcpBridgeHandler *tcpBridge = nullptr;
++#endif
++
+ #if defined(TCXO_OPTIONAL)
+ float tcxoVoltage = SX126X_DIO3_TCXO_VOLTAGE; // if TCXO is optional, put this here so it can be changed further down.
+ #endif
+@@ -967,6 +972,14 @@ void setup()
+         udpHandler->start();
+     }
+ #endif
++#endif
++
++#ifdef HAS_TCP_BRIDGE
++    LOG_DEBUG("Start TCP bridge");
++    tcpBridge = new TcpBridgeHandler();
++#ifdef ARCH_PORTDUINO
++    tcpBridge->start();
++#endif
+ #endif
+     service = new MeshService();
+     service->init();

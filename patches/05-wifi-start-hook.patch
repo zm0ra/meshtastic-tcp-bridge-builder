@@ -1,0 +1,17 @@
+diff --git a/src/mesh/wifi/WiFiAPClient.cpp b/src/mesh/wifi/WiFiAPClient.cpp
+index 45944872e..c223773df 100644
+--- a/src/mesh/wifi/WiFiAPClient.cpp
++++ b/src/mesh/wifi/WiFiAPClient.cpp
+@@ -149,6 +149,12 @@ static void onNetworkConnected()
+         udpHandler->start();
+     }
+ #endif
++
++#if HAS_TCP_BRIDGE
++    if (tcpBridge) {
++        tcpBridge->start();
++    }
++#endif
+ }
+ 
+ static int32_t reconnectWiFi()
