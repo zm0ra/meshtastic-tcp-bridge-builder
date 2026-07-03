@@ -130,43 +130,53 @@ class TcpBridgeHandler final : private concurrency::OSThread
         rxLen[i] = 0;
     }
 
-    // The socket accepted by WiFiServer::available() lives on the heap for as
-    // long as the client is connected -- copying a WiFiClient into a stack
-    // temporary and letting it fall out of scope here closes the underlying
-    // socket on some arduino-esp32 core versions even though the array still
-    // holds a "connected" looking copy, which silently drops every accepted
-    // connection right after the log line fires.
+    // A WiFiClient copy-constructed from a named local still closes the
+    // underlying socket when that local's destructor runs at the end of this
+    // function, even though the heap copy looks "connected" right after
+    // accept -- the socket is dead by the time the next poll tries to read
+    // it. Constructing the heap object directly from server->available()'s
+    // return value keeps this to a single construction (guaranteed copy
+    // elision), so no intermediate object's destructor ever runs.
     void acceptNewClients()
     {
         if (!server->hasClient())
             return;
-        WiFiClient pending = server->available();
-        if (!pending)
-            return;
         for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
             if (clients[i])
                 continue;
-            clients[i] = new WiFiClient(pending);
+            clients[i] = new WiFiClient(server->available());
+            if (!*clients[i]) {
+                delete clients[i];
+                clients[i] = nullptr;
+                return;
+            }
             rxLen[i] = 0;
             LOG_DEBUG("TCP bridge client %d connected", i);
             return;
         }
         LOG_DEBUG("TCP bridge: max clients reached, rejecting connection");
-        pending.stop();
+        server->available().stop();
     }
 
     // Fills rxBuf[i] until a full frame is in, then dispatches it. Per-client
     // state so a frame split across reads still assembles.
+    //
+    // The frame-complete check has to run in the same pass that reads the
+    // last needed byte, not at the top of a fresh while-iteration -- if the
+    // whole frame arrives in a single TCP segment, available() drops to 0
+    // the instant the last byte is consumed, so a check gated behind
+    // "while (client.available() > 0)" never runs again and the fully
+    // buffered frame sits there forever.
     void pumpClientInput(int i, WiFiClient &client)
     {
         while (client.available() > 0) {
-            if (rxLen[i] < 4) {
-                int b = client.read();
-                if (b < 0)
-                    return;
-                rxBuf[i][rxLen[i]++] = (uint8_t)b;
+            int b = client.read();
+            if (b < 0)
+                return;
+            rxBuf[i][rxLen[i]++] = (uint8_t)b;
+
+            if (rxLen[i] < 4)
                 continue;
-            }
 
             uint32_t frameLen = ((uint32_t)rxBuf[i][0] << 24) | ((uint32_t)rxBuf[i][1] << 16) |
                                  ((uint32_t)rxBuf[i][2] << 8) | (uint32_t)rxBuf[i][3];
@@ -178,13 +188,8 @@ class TcpBridgeHandler final : private concurrency::OSThread
             }
 
             size_t haveBody = rxLen[i] - 4;
-            if (haveBody < frameLen) {
-                int b = client.read();
-                if (b < 0)
-                    return;
-                rxBuf[i][rxLen[i]++] = (uint8_t)b;
+            if (haveBody < frameLen)
                 continue;
-            }
 
             handleFrame(i, rxBuf[i] + 4, frameLen);
             rxLen[i] = 0;
