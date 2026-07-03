@@ -31,6 +31,9 @@ class TcpBridgeHandler final : private concurrency::OSThread
     TcpBridgeHandler()
         : concurrency::OSThread("TcpBridge"), isRunning(false), port(TCP_BRIDGE_DEFAULT_PORT), server(nullptr)
     {
+        for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
+            clients[i] = nullptr;
+        }
     }
 
     void start(int listenPort = TCP_BRIDGE_DEFAULT_PORT)
@@ -54,8 +57,7 @@ class TcpBridgeHandler final : private concurrency::OSThread
         if (!isRunning)
             return;
         for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
-            if (clients[i])
-                clients[i].stop();
+            freeClient(i);
         }
         if (server) {
             server->end();
@@ -88,10 +90,10 @@ class TcpBridgeHandler final : private concurrency::OSThread
 
         bool wroteAny = false;
         for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
-            if (!clients[i] || !clients[i].connected())
+            if (!clients[i] || !clients[i]->connected())
                 continue;
-            clients[i].write(header, sizeof(header));
-            clients[i].write(payload, payloadLen);
+            clients[i]->write(header, sizeof(header));
+            clients[i]->write(payload, payloadLen);
             wroteAny = true;
         }
         return wroteAny;
@@ -106,35 +108,51 @@ class TcpBridgeHandler final : private concurrency::OSThread
         acceptNewClients();
 
         for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
-            WiFiClient &client = clients[i];
-            if (!client || !client.connected()) {
-                if (client)
-                    client.stop();
+            if (!clients[i])
+                continue;
+            if (!clients[i]->connected()) {
+                freeClient(i);
                 continue;
             }
-            pumpClientInput(i, client);
+            pumpClientInput(i, *clients[i]);
         }
         return 20;
     }
 
   private:
+    void freeClient(int i)
+    {
+        if (!clients[i])
+            return;
+        clients[i]->stop();
+        delete clients[i];
+        clients[i] = nullptr;
+        rxLen[i] = 0;
+    }
+
+    // The socket accepted by WiFiServer::available() lives on the heap for as
+    // long as the client is connected -- copying a WiFiClient into a stack
+    // temporary and letting it fall out of scope here closes the underlying
+    // socket on some arduino-esp32 core versions even though the array still
+    // holds a "connected" looking copy, which silently drops every accepted
+    // connection right after the log line fires.
     void acceptNewClients()
     {
         if (!server->hasClient())
             return;
-        WiFiClient newClient = server->available();
-        if (!newClient)
+        WiFiClient pending = server->available();
+        if (!pending)
             return;
         for (int i = 0; i < TCP_BRIDGE_MAX_CLIENTS; i++) {
-            if (!clients[i] || !clients[i].connected()) {
-                clients[i] = newClient;
-                rxLen[i] = 0;
-                LOG_DEBUG("TCP bridge client %d connected", i);
-                return;
-            }
+            if (clients[i])
+                continue;
+            clients[i] = new WiFiClient(pending);
+            rxLen[i] = 0;
+            LOG_DEBUG("TCP bridge client %d connected", i);
+            return;
         }
         LOG_DEBUG("TCP bridge: max clients reached, rejecting connection");
-        newClient.stop();
+        pending.stop();
     }
 
     // Fills rxBuf[i] until a full frame is in, then dispatches it. Per-client
@@ -203,7 +221,7 @@ class TcpBridgeHandler final : private concurrency::OSThread
     bool isRunning;
     int port;
     WiFiServer *server;
-    WiFiClient clients[TCP_BRIDGE_MAX_CLIENTS];
+    WiFiClient *clients[TCP_BRIDGE_MAX_CLIENTS];
     uint8_t rxBuf[TCP_BRIDGE_MAX_CLIENTS][4 + TCP_BRIDGE_MAX_FRAME_SIZE];
     size_t rxLen[TCP_BRIDGE_MAX_CLIENTS];
 };
